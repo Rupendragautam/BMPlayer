@@ -11,12 +11,14 @@ import SnapKit
 import MediaPlayer
 
 /// BMPlayerDelegate to obserbe player state
-public protocol BMPlayerDelegate : class {
+public protocol BMPlayerDelegate : AnyObject {
     func bmPlayer(player: BMPlayer, playerStateDidChange state: BMPlayerState)
     func bmPlayer(player: BMPlayer, loadedTimeDidChange loadedDuration: TimeInterval, totalDuration: TimeInterval)
     func bmPlayer(player: BMPlayer, playTimeDidChange currentTime : TimeInterval, totalTime: TimeInterval)
     func bmPlayer(player: BMPlayer, playerIsPlaying playing: Bool)
     func bmPlayer(player: BMPlayer, playerOrientChanged isFullscreen: Bool)
+    
+    func bmPlayer(player: BMPlayer, playButtonPressed isPlay: Bool)
 }
 
 /**
@@ -109,7 +111,7 @@ open class BMPlayer: UIView {
     fileprivate var isMirrored      = false
     fileprivate var isPlayToTheEnd  = false
     //视频画面比例
-    fileprivate var aspectRatio: BMPlayerAspectRatio = .default
+    public var aspectRatio: BMPlayerAspectRatio = .default
     
     //Cache is playing result to improve callback performance
     fileprivate var isPlayingCache: Bool? = nil
@@ -164,6 +166,8 @@ open class BMPlayer: UIView {
         panGesture.isEnabled = true
         playerLayer?.play()
         isPauseByUser = false
+        NotificationCenter.default.post(name: Notification.Name("verticalPlayerState"), object: "pause")
+        
     }
     
     /**
@@ -189,7 +193,15 @@ open class BMPlayer: UIView {
      update UI to fullScreen
      */
     open func updateUI(_ isFullScreen: Bool) {
-        controlView.updateUI(isFullScreen)
+        if #available(iOS 16.0, *) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: {
+                self.controlView.updateUI(isFullScreen)
+            })
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: {
+                self.controlView.updateUI(isFullScreen)
+            })
+        }
     }
     
     /**
@@ -337,13 +349,31 @@ open class BMPlayer: UIView {
     }
     
     @objc fileprivate func fullScreenButtonPressed() {
-        controlView.updateUI(!self.isFullScreen)
+        if #available(iOS 16.0, *) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: {
+                self.controlView.updateUI(self.isFullScreen)
+            })
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: {
+                self.controlView.updateUI(self.isFullScreen)
+            })
+        }
         if isFullScreen {
-            UIDevice.current.setValue(UIInterfaceOrientation.portrait.rawValue, forKey: "orientation")
+            if #available(iOS 16.0, *) {
+                let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene
+                windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait))
+            } else {
+                UIDevice.current.setValue(UIInterfaceOrientation.portrait.rawValue, forKey: "orientation")
+            }
             UIApplication.shared.setStatusBarHidden(false, with: .fade)
             UIApplication.shared.statusBarOrientation = .portrait
         } else {
-            UIDevice.current.setValue(UIInterfaceOrientation.landscapeRight.rawValue, forKey: "orientation")
+            if #available(iOS 16.0, *) {
+                let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene
+                windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: .landscapeRight))
+            } else {
+                UIDevice.current.setValue(UIInterfaceOrientation.landscapeRight.rawValue, forKey: "orientation")
+            }
             UIApplication.shared.setStatusBarHidden(false, with: .fade)
             UIApplication.shared.statusBarOrientation = .landscapeRight
         }
@@ -524,6 +554,7 @@ extension BMPlayer: BMPlayerControlViewDelegate {
             case .play:
                 if button.isSelected {
                     pause()
+                    delegate?.bmPlayer(player: self, playButtonPressed: false)
                 } else {
                     if isPlayToTheEnd {
                         seek(0, completion: {[weak self] in
@@ -533,12 +564,16 @@ extension BMPlayer: BMPlayerControlViewDelegate {
                         isPlayToTheEnd = false
                     }
                     play()
+                    
+                    delegate?.bmPlayer(player: self, playButtonPressed: true)
                 }
                 
             case .replay:
                 isPlayToTheEnd = false
                 seek(0)
                 play()
+                
+                delegate?.bmPlayer(player: self, playButtonPressed: true)
                 
             case .fullscreen:
                 fullScreenButtonPressed()
